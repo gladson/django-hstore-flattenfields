@@ -1,306 +1,204 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-'''
-Created on 13/10/2012
+"""
+hstore_flattenfields.models
+-------------
 
-@author: iuri
-'''
-import sys
-from django.db import models, connection
+The Models file where places all the stored classes
+used in hstore_flattenfields application.
+
+:copyright: 2013, multmeio (http://www.multmeio.com.br)
+:author: 2013, Iuri Diniz <iuridiniz@gmail.com>
+:license: BSD, see LICENSE for more details.
+"""
+
+from django.db import models
+from django.contrib.contenttypes.models import ContentType
+from django.utils.translation import ugettext as _
+
 from django_orm.postgresql import hstore
-from django.utils.datastructures import SortedDict
-from django.db.models.fields import FieldDoesNotExist
-from django import forms
+from django_extensions.db.fields import AutoSlugField
 
-from datetime import datetime
-import json
+from db.base import (
+    HStoreModel,
+    HStoreGroupedModel,
+    HStoreM2MGroupedModel,
+)
+from hstore_flattenfields.utils import (
+    single_list_to_tuple,
+    FIELD_TYPES,
+    FIELD_TYPES_WITHOUT_BLANK_OPTION,
+)
+from hstore_flattenfields.signals import *
 
-# import caching.base
-import copy
 
-from fields import *
-from queryset import *
-from utils import *
+# Setup the "class Meta:" flattenfields custom configs
+models.options.DEFAULT_NAMES += (
+    'hstore_related_field',
+)
 
+class DynamicFieldGroup(models.Model):
+    """
+    Class context to fields in the use case.
+    This has to be implemented on main app, and related to
+    class HstoreModel that contains ``_dfields``.
 
-dfields = None
+    :param name: The name of the Group.
+    :param slug: Auto-slug which was generated using the ``name`` as a seed.
+    :param description: The text description about what this Group means in your logic.
 
-# NOTE: Error happen on syncdb, because DynamicField's table does not exist.
-cursor = connection.cursor()
-cursor.execute("select count(*) from pg_tables where tablename='dynamic_field'")
-DYNAMIC_FIELD_TABLE_EXIST =  (cursor.fetchone()[0] > 0)
+    >>> group = DynamicFieldGroup.objects.create(name="Test Group")
+    >>> group.slug
+    u'test_group'
 
-class DynamicField(models.Model):
-    refer = models.CharField(max_length=120, blank=False, db_index=True, verbose_name="Class name")
-    name = models.CharField(max_length=120, blank=False, db_index=True, unique=True, verbose_name="Field name")
-    verbose_name = models.CharField(max_length=120, blank=False, verbose_name="Verbose name")
-    typo = models.CharField(max_length=20, blank=False, db_index=True, verbose_name="Field type",
-        choices=single_list_to_tuple(FIELD_TYPES))
-    max_length = models.IntegerField(null=True, blank=True, verbose_name="Length")
-    order = models.IntegerField(null=True, blank=True, default=None, verbose_name="Order")
-    blank = models.BooleanField(default=True, verbose_name="Blank")
-    choices = models.TextField(null=True, blank=True, verbose_name="Choices")
-    default_value = models.CharField(max_length=80, null=True, blank=True, verbose_name="Default value")
+    >>> group.name = "New Group"
+    >>> group.save()
+    >>> group.slug
+    u'new_group'
+    """
+    name = models.CharField(max_length=80, null=False, verbose_name=_('Name'))
+    slug = AutoSlugField(populate_from='name', separator='_', max_length=100, unique=True, overwrite=True)
+    description = models.TextField(null=True, blank=True, verbose_name=_('Description'))
 
     class Meta:
-        db_table = u'dynamic_field'
+        verbose_name = _('Dynamic Field Group')
+        verbose_name_plural = _('Dynamic Field Groups')
+
+    def __unicode__(self):
+        """
+        Returns a pretty representation of this object.
+
+        >>> group = DynamicFieldGroup.objects.create(name="Test Group")
+        >>> unicode(group)
+        u'Test Group'
+        """
+        return u"%s" % self.name
+
+    @property
+    def fields(self):
+        """
+        Returns all the related ``DynamicField`` instances from cache.
+
+        >>> DynamicField.objects.all().delete()
+        >>> group = DynamicFieldGroup.objects.create(name="Test Group")
+        >>> DynamicField.objects.create(refer="Something", group=group, name="something_age", verbose_name=u"Age")
+        <DynamicField: Age>
+        >>> group.fields
+        [<DynamicField: Age>]
+        """
+        return DynamicField.objects.filter(models.Q(group=self) | models.Q(group=None))
+
+
+class ContentPane(models.Model):
+    """
+    Class to contains fields reproduced into TABs, DIVs,... on templates.
+
+    :param name: The name of the ``ContentPane``.
+    :param slug: Auto-slug which was generated using the ``name`` as a seed.
+    :param order: The 0-indexed order which the ``ContentPane`` is places inside the ``Form``.
+    :param content_type: The ``ContentType`` which the ``ContentPane`` will be shown.
+    :param group: The ``DynamicFieldGroup`` instance which the ``ContentPane`` is owned.
+
+    >>> content_pane = ContentPane.objects.create(name="Test Content Pane")
+    >>> content_pane.slug
+    u'test_content_pane'
+    """
+    name = models.CharField(max_length=80, null=False, verbose_name=_('Name'))
+    order = models.IntegerField(null=False, blank=False, default=0, verbose_name=_('Order'))
+    slug = AutoSlugField(populate_from='name', separator='_',max_length=100, unique=True, overwrite=True)
+
+    # relations
+    content_type = models.ForeignKey(ContentType, null=True, blank=True, related_name='content_panes')
+    group = models.ForeignKey(DynamicFieldGroup, null=True, blank=True, related_name='content_panes', verbose_name=_("Groups"))
+
+    class Meta:
+        verbose_name = _('Content Pane')
+        verbose_name_plural = _('Content Panes')
+        ordering = ['order', 'slug']
+
+    def __unicode__(self):
+        """
+        Returns a pretty representation of this object.
+
+        >>> content_pane = ContentPane.objects.create(name="Test Content Pane")
+        >>> unicode(content_pane)
+        u'Test Content Pane'
+        """
+        return u"%s" % self.name
+
+    @property
+    def fields(self):
+        """
+        Returns all the related ``DynamicField`` instances from cache.
+
+        >>> content_pane = ContentPane.objects.create(name="Test Content Pane")
+        >>> DynamicField.objects.create(refer="MyModel", content_pane=content_pane, name="my_model_age", verbose_name=u"Age")
+        <DynamicField: Age>
+        >>> DynamicField.objects.create(refer="MyModel", name="my_model_foobar", verbose_name=u"Foobar")
+        <DynamicField: Foobar>
+        >>> content_pane.fields
+        [<DynamicField: Age>]
+        """
+        return self.dynamic_fields.order_by('order')
+
+    @property
+    def is_generic(self):
+        """
+        Return a boolean value if this ``ContentPane`` is Generic,
+        that means if this ``ContentPane`` will be shown everywhere, like
+        in forms, views...
+
+        >>> group = DynamicFieldGroup.objects.create(name="Test Group Generic")
+        >>> content_pane = ContentPane.objects.create(name="Test Content Pane Generic")
+        >>> content_pane.is_generic
+        True
+        >>> content_pane2 = ContentPane.objects.create(name="Test Content Pane Not Generic", group=group)
+        >>> content_pane2.is_generic
+        False
+
+        """
+        return not self.group
+
+
+class DynamicField(models.Model):
+    """
+    Created to represent the Django Model's field information,
+    we use him to fill the Field instances when the ``refer``
+    instances will be build.
+
+    :param refer: The name of the Model of the ``DynamicField``.
+    :param name: The name of the ``DynamicField``.
+    :param verbose_name: The Verbose Name of the ``DynamicField``.
+    :param order: The 0-indexed order which the ``DynamicField`` is places inside the ``Form``.
+    :param content_type: The ``ContentType`` which the ``ContentPane`` will be shown.
+    :param group: The ``DynamicFieldGroup`` instance which the ``ContentPane`` is owned.
+
+    """
+    refer = models.CharField(max_length=120, blank=False, db_index=True, verbose_name=_("Class name"))
+    name = models.CharField(max_length=120, blank=False, db_index=True,unique=True, verbose_name=_("Field name"))
+    verbose_name = models.CharField(max_length=120, blank=False, verbose_name=_("Verbose name"))
+    typo = models.CharField(max_length=20, blank=False, db_index=True, verbose_name=_("Field type"), choices=single_list_to_tuple(FIELD_TYPES))
+    max_length = models.IntegerField(null=True, blank=True, verbose_name=_("Length"))
+    order = models.IntegerField(null=True, blank=True, default=None, verbose_name=_("Order"))
+    blank = models.BooleanField(default=True, verbose_name=_("Blank"))
+    choices = models.TextField(null=True, blank=True, verbose_name=_("Choices"))
+    default_value = models.CharField(max_length=80, null=True, blank=True, verbose_name=_("Default value"))
+    help_text = models.CharField(max_length=255, null=True, blank=True, verbose_name=_('Help Text'))
+    html_attrs = hstore.DictionaryField(db_index=True, null=True, blank=True, default=None, verbose_name=_("html Attributes"))
+
+    # relations
+    group = models.ForeignKey(DynamicFieldGroup, null=True, blank=True, related_name="dynamic_fields", verbose_name=_("Groups"))
+    content_pane = models.ForeignKey(ContentPane, null=True, blank=True, related_name="dynamic_fields", verbose_name=_("Panel"))
+
+    class Meta:
+        verbose_name = _('Dynamic Field')
+        verbose_name_plural = _('Dynamic Fields')
+        # ordering = ['pk']
 
     def __unicode__(self):
         return self.verbose_name or self.name
 
     @property
     def has_blank_option(self):
-        return self.blank and \
-            self.typo not in FIELD_TYPES_WITHOUT_BLANK_OPTION
-
-    def save(self, *args, **kwargs):
-        super(DynamicField, self).save(*args, **kwargs)
-        # NOTE: force update global dfields fieldset
-        global dfields
-        dfields =  DynamicField.objects.all()
-
-
-# XXX: Charge memory with all dfields for prevent flood on db.
-dfields =  DynamicField.objects.all()
-
-def find_dfields(refer=None, name=None):
-    if name and refer:
-        return [dfield for dfield in dfields \
-            if dfield.refer == refer and dfield.name == name]
-    if name and not refer:
-        [dfield for dfield in dfields if dfield.name == name]
-    return [dfield for dfield in dfields if dfield.refer == refer]
-
-
-
-class HStoreModelMeta(models.Model.__metaclass__):
-    def __new__(cls, name, bases, attrs):
-        super_new = super(HStoreModelMeta, cls).__new__
-
-        # create it
-        new_class = super_new(cls, name, bases, attrs)
-
-        # pos create
-
-        # override getattr/setattr/delattr
-        old_getattribute = new_class.__getattribute__
-        def __getattribute__(self, key):
-            field = None
-
-            try:
-                return old_getattribute(self, key)
-            except AttributeError:
-                field = find_dfields(refer=self.__class__.__name__, name=key)
-
-                if hasattr(self, '_dfields') and key in self._dfields:
-                    return self._dfields[key]
-                elif field:
-                    # FIXME: This Dynamic field really exists
-                    return field[0].default_value
-                else:
-                    raise
-            except ValueError:
-                if isinstance(field, list) and field:
-                    return field[0].default_value
-            except TypeError:
-                field = find_dfields(refer=self.__class__.__name__, name=key)
-
-                if field and field.__class__.__name__ == 'ManyRelatedManager':
-                    return field.all()
-
-                return field
-
-        new_class.__getattribute__ = __getattribute__
-
-        old_setattr = new_class.__setattr__
-        def __setattr__(self, key, value):
-            #print "called __setattr__(%r, %r)" % (key, value)
-
-            if hasattr(self, '_dfields') and not key in dir(new_class):
-                # XXX: search for key on table, django will call this method many times on __init__
-                new_class_refer = new_class.__name__
-                # if DynamicField.objects.filter(refer=new_class_refer, name=key).exists():
-                if find_dfields(refer=new_class_refer, name=key):
-                    if isinstance(value, (list, tuple)):
-                        value = [unicode(v) for v in value]
-                    elif value is not None:
-                        value = unicode(value)
-                    self._dfields[key] = unicode(value)
-                    return
-
-            old_setattr(self, key, value)
-
-        new_class.__setattr__ = __setattr__
-
-        old_delattr = new_class.__delattr__
-        def __delattr__(self, key):
-            if hasattr(self, '_dfields') and not key in dir(new_class):
-                if key in self._dfields:
-                    del self._dfields[key]
-                    return
-
-            return old_delattr(self, key)
-        new_class.__delattr__ = __delattr__
-
-        # override _meta.fields (property)
-        _old_meta = new_class._meta
-        class _meta(object):
-            def __eq__(self, other):
-                return _old_meta == other
-
-            def __getattr__(self, key):
-                return getattr(_old_meta, key)
-            def __setattr__(self, key, value):
-                return setattr(_old_meta, key, value)
-
-            def init_name_map(self):
-                _cache = _old_meta.init_name_map()
-
-                for dfield in self.dynamic_fields:
-                    _cache.update(**{
-                        dfield.name: (dfield, _old_meta.concrete_model, True, False)
-                    })
-
-                return _cache
-
-            def get_field_by_name(self, name):
-                if name is 'pk': name = 'id'
-
-                try:
-                    if hasattr(self, '_name_map') and name in self._name_map:
-                        return self._name_map[name]
-                    else:
-                        cache = self.init_name_map()
-                        return cache[name]
-                except KeyError:
-                    raise FieldDoesNotExist('%s has no field named %r'
-                            % (self.object_name, name))
-
-            def get_field(self, name, many_to_many=True):
-                """
-                Returns the requested field by name. Raises FieldDoesNotExist on error.
-                """
-                to_search = many_to_many and (self.fields + self.many_to_many) or self.fields
-                for f in to_search:
-                    if f.name == name:
-                        return f
-
-                raise FieldDoesNotExist('%s has no field named %r' % (self.object_name, name))
-
-            def get_all_field_names(self):
-                return [f.name for f in self.fields if not f.name == '_dfields']
-
-            def get_all_dynamic_field_names(self):
-                return [f.name for f in self.dynamic_fields if not f.name == '_dfields']
-
-            @property
-            def dynamic_fields(self):
-                fields = []
-                if not DYNAMIC_FIELD_TABLE_EXIST:
-                    return fields
-
-                # metafields = DynamicField.objects.filter(refer=new_class.__name__)
-                metafields = find_dfields(refer=new_class.__name__)
-                for metafield in metafields:
-                    try:
-                        fields.append(
-                            crate_field_from_instance(metafield)
-                        )
-                    except SyntaxError:
-                        raise \
-                            TypeError(('Cannot create field for %r, maybe type %r ' + \
-                                       'is not a django type') % (metafield, metafield.typo))
-                return fields
-
-            @property
-            def fields(self):
-                #add dynamic_fields from table
-                return _old_meta.fields + self.dynamic_fields
-
-            def get_base_chain(self, model):
-                """
-                Returns a list of parent classes leading to 'model' (order from closet
-                to most distant ancestor). This has to handle the case were 'model' is
-                a granparent or even more distant relation.
-                """
-
-                if model in self.parents or not self.parents:
-                    # FIXME: In cases of the actual Model doesn`t have
-                    # Any parent, so return him
-                    return [model]
-
-                parent = None
-                for parent in self.parents:
-                    res = parent._meta.get_base_chain(model)
-                    if res:
-                        res.insert(0, parent)
-                        return res
-
-                if model.__base__ == parent:
-                    return [parent]
-
-                raise TypeError('%r is not an ancestor of this model'
-                        % model._meta.module_name)
-
-        new_class._meta = _meta()
-        return new_class
-
-
-class HStoreModel(models.Model):
-    __metaclass__ = HStoreModelMeta
-    _dfields = hstore.DictionaryField(db_index=True, null=True, blank=True)
-
-    objects = FlattenFieldsFilterManager()
-
-    class Meta:
-        abstract = True
-
-    def __init__(self, *args, **kwargs):
-        _dfields = None
-        if args:
-            # XXX: hack in order to save _dfields without alter django
-            # save _dfields in args and restore
-
-            # what the index of _dfields?
-            i = 0
-            index = None
-            for f in self._meta.local_fields:
-                if f.name == "_dfields":
-                    index = i
-                    break
-                i = i + 1
-            if index is not None and index < len(args):
-                _dfields = args[index]
-
-        super(HStoreModel, self).__init__(*args, **kwargs)
-        if _dfields:
-            self._dfields = _dfields
-
-    def __getattr__(self, attr_name):
-        """
-        This method was override because we have to manipulate the format
-        of the data should be shown in the templates. By adding a property
-        called 'pretty_FIELDNAME'.
-        """
-        field_name = attr_name.replace('pretty_', '')
-        field = find_dfields(refer=self.__class__.__name__, name=field_name)
-
-        if field:
-            field = field[0]
-            value = getattr(self, field.name)
-
-            if field.typo in PRETTY_FIELDS:
-                if field.typo == "Monetary":
-                    new_value = 'R$ %s' % dec2real(value)
-
-                elif field.typo in ["CheckBox", "MultSelect"]:
-                    new_value = ", ".join(str2literal(value)) + "."
-
-                elif field.typo == "Date":
-                    y, m, d = tuple([int(x) for x in value.split('/')][::-1])
-                    new_value = datetime(y, m, d)
-
-                setattr(self, attr_name, new_value)
-
-        return super(HStoreModel, self).__getattribute__(attr_name)
+        return self.blank and self.typo not in FIELD_TYPES_WITHOUT_BLANK_OPTION

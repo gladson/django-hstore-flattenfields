@@ -1,0 +1,107 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+#
+# Translators:
+# Luan Fonseca <luanfonceca@gmail.com>, 2013
+msgid ""
+msgstr ""
+"Project-Id-Version: Hstore Flattenfields\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2013-10-04 05:31-0300\n"
+"PO-Revision-Date: 2013-09-13 10:30+0000\n"
+"Last-Translator: Luan Fonseca de Farias <luanfonceca@gmail.com>\n"
+"Language-Team: Portuguese (Brazil)\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: models.py:40 models.py:60
+msgid "Name"
+msgstr "Nome"
+
+#: models.py:42
+msgid "Description"
+msgstr "Descrição"
+
+#: models.py:45
+msgid "Dynamic Field Group"
+msgstr "Grupo de Campo Dinâmico"
+
+#: models.py:46
+msgid "Dynamic Field Groups"
+msgstr "Grupos de Campo Dinâmico"
+
+#: models.py:61 models.py:87
+msgid "Order"
+msgstr "Ordem"
+
+#: models.py:66 models.py:95
+msgid "Groups"
+msgstr "Grupos"
+
+#: models.py:69
+msgid "Content Pane"
+msgstr "Painél de Conteúdo"
+
+#: models.py:70
+msgid "Content Panes"
+msgstr "Paineis de Conteúdo"
+
+#: models.py:82
+msgid "Class name"
+msgstr "Nome da Classe"
+
+#: models.py:83
+msgid "Field name"
+msgstr "Nome do Campo"
+
+#: models.py:84
+msgid "Verbose name"
+msgstr "Nome"
+
+#: models.py:85
+msgid "Field type"
+msgstr "tipo do Campo"
+
+#: models.py:86
+msgid "Length"
+msgstr "Tamanho de Caracteres"
+
+#: models.py:88
+msgid "Blank"
+msgstr "Vazio"
+
+#: models.py:89
+msgid "Choices"
+msgstr "Opções"
+
+#: models.py:90
+msgid "Default value"
+msgstr "Valor Padrão"
+
+#: models.py:91
+msgid "Help Text"
+msgstr "Texto de Ajuda"
+
+#: models.py:92
+msgid "html Attributes"
+msgstr "Atributos HTML"
+
+#: models.py:96
+msgid "Panel"
+msgstr "Painél"
+
+#: models.py:101
+msgid "Dynamic Field"
+msgstr "Campo Dinâmico"
+
+#: models.py:102
+msgid "Dynamic Fields"
+msgstr "Campos Dinâmicos"
+
+#: templates/hstore_flattenfields/form_with_tabs.html:11
+msgid "There are no fields in this Pane."
+msgstr "Não há campos neste Painél."
